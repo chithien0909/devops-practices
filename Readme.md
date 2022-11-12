@@ -1,0 +1,1 @@
+LOAD DATA INFILE '/var/ml-100k/u.item' INTO TABLE movielens.movies CHARACTER SET latin1 FIELDS TERMINATED BY '|'  (movieID, title, @var3) set releaseDate = STR_TO_DATE(@var3, '%d-%M-%Y');

@@ -1,0 +1,133 @@
+version: '3.3'
+
+services:
+  setup:
+    build:
+      context: setup/
+      args:
+        ELASTIC_VERSION: ${ELASTIC_VERSION}
+    init: true
+    volumes:
+      - setup:/state:Z
+    environment:
+      ELASTIC_PASSWORD: changeme
+      LOGSTASH_INTERNAL_PASSWORD: changeme
+      KIBANA_SYSTEM_PASSWORD: changeme
+    networks:
+      - elk
+    depends_on:
+      - elasticsearch
+  elasticsearch:
+    container_name: "logstash_elasticsearch"
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.3.3
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+
+    configs:
+      - source: elastic_config
+        target: /usr/share/elasticsearch/config/elasticsearch.yml
+    volumes:
+      - ./data/elk:/usr/share/elasticsearch/data
+      - ./logstash/pipeline:/etc/logstash/conf.d
+    environment:
+      ES_JAVA_OPTS: "-Xmx256m -Xms256m"
+      ELASTIC_PASSWORD: changeme
+      LOGSTASH_INTERNAL_PASSWORD: changeme
+      KIBANA_SYSTEM_PASSWORD: changeme
+      ES_HEAP_SIZE: 1g
+      MAY_LOCKED_MEMORY: unlimited
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+
+  logstash:
+    container_name: "logstash_logstash"
+    image: docker.elastic.co/logstash/logstash:8.3.3
+    ports:
+      - "5001:5000"
+      - "9600:9600"
+    configs:
+      - source: logstash_config
+        target: /usr/share/logstash/config/logstash.yml
+      - source: logstash_pipeline
+        target: /usr/share/logstash/pipeline
+    environment:
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    volumes:
+      - ./data/logs/access_logs:/logs/access_logs
+      - ./data/csv/csv-schema-short-numerical.csv:/file/csv-schema-short-numerical.csv
+      - ./data/jar_files/mysql-connector-java-8.0.19.jar:/usr/share/logstash/logstash-core/lib/jars/mysql-connector-java-8.0.19.jar
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+    depends_on:
+      - elasticsearch
+
+  kibana:
+    container_name: "logstash_kibana"
+    image: docker.elastic.co/kibana/kibana:8.3.3
+    ports:
+      - "8601:5601"
+    configs:
+      - source: kibana_config
+        target: /usr/share/kibana/config/kibana.yml
+    networks:
+      - elk
+    deploy:
+      mode: replicated
+      replicas: 1
+    depends_on:
+      - elasticsearch
+  mysql:
+    container_name: "logstash_mysql"
+    image: mysql:8.0.31
+    restart: always
+    networks:
+      - elk
+    environment:
+      MYSQL_ROOT_PASSWORD: changeme
+      MYSQL_DATABASE: movielens
+      MYSQL_USER: testuser
+      MYSQL_PASSWORD: changeme
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/dump:/docker-entrypoint-initdb.d
+      - ./ml-100k:/var/ml-100k
+    ports:
+      - "3306:3306"
+  filebeat:
+      container_name: "logstash_filebeat"
+      image: docker.elastic.co/beats/filebeat:8.3.3
+      environment:
+        ELASTIC_PASSWORD: changeme
+      user: root
+      networks:
+        - elk
+      volumes:
+        - './data/var/filebeat/log/:/var/log/:ro'
+        - './data/var/filebeat/docker.sock:/var/run/docker.sock'
+        - './data/logs/:/var/lib/docker/containers/logs:ro'
+        - './filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml'
+      command: [ "--strict.perms=false" ]
+
+configs:
+  elastic_config:
+    file: ./elasticsearch/config/elasticsearch.yml
+  logstash_config:
+    file: ./logstash/config/logstash.yml
+  logstash_pipeline:
+    file: ./logstash/pipeline
+  kibana_config:
+    file: ./kibana/config/kibana.yml
+
+volumes:
+  setup:
+
+networks:
+  elk:
+    driver: bridge
